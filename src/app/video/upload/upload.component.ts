@@ -7,6 +7,10 @@ import { last, switchMap } from 'rxjs/operators';
 import { AngularFireAuth } from '@angular/fire/compat/auth';
 import firebase from 'firebase/compat/app'
 import { ClipService } from 'src/app/services/clip.service';
+import { Router } from '@angular/router';
+import { FfmpegService } from 'src/app/services/ffmpeg.service';
+
+
 
 
 @Component({
@@ -41,17 +45,19 @@ export class UploadComponent implements OnDestroy {
   constructor(
     private storage: AngularFireStorage,
     private auth: AngularFireAuth,
-    private clipsService: ClipService
+    private clipsService: ClipService,
+    private router: Router,
+    public ffmpegService: FfmpegService
   ) {
-    auth.user.subscribe(user => this.user = user
-    )
+    auth.user.subscribe(user => this.user = user)
+    this.ffmpegService.init()
   }
 
   ngOnDestroy(): void {
     this.task?.cancel()
   }
 
-  storeFile($event: Event) {
+  async storeFile($event: Event) {
     this.isDragover = false
 
     this.file = ($event as DragEvent).dataTransfer ?
@@ -60,6 +66,9 @@ export class UploadComponent implements OnDestroy {
     if (!this.file || this.file.type !== "video/mp4") {
       return
     }
+
+    await this.ffmpegService.getScreenshot(this.file)
+
     this.title.setValue(
       this.file.name.replace(/\.[^/.]+$/, "")
     )
@@ -84,21 +93,27 @@ export class UploadComponent implements OnDestroy {
     this.task.snapshotChanges().pipe(
       last(), switchMap(() => clipRef.getDownloadURL())
     ).subscribe({
-      next: (url) => {
+      next: async (url) => {
         const clip = {
           uid: this.user?.uid as string,
           displayName: this.user?.displayName as string,
           title: this.title.value,
           fileName: `${clipFileName}.mp4`,
-          url
+          url,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
         }
 
-        this.clipsService.createClip(clip)
+        const clipDocRef = await this.clipsService.createClip(clip)
         console.log(clip);
 
         this.alertColor = "green"
         this.alertMsg = "Succes! your clip is now ready to share with the world"
         this.showPercentage = false
+        setTimeout(() => {
+          this.router.navigate([
+            "clip", clipDocRef.id,
+          ])
+        }, 1000)
       },
       error: (error) => {
         this.uploadForm.enable()
